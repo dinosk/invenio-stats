@@ -26,13 +26,14 @@
 
 from __future__ import absolute_import, print_function
 
+import datetime
 import uuid
 
 import pytest
 from elasticsearch_dsl import Search
 from flask import Flask
 from invenio_queues.proxies import current_queues
-from invenio_search import current_search_client
+from invenio_search import current_search, current_search_client
 
 from invenio_stats import InvenioStats
 from invenio_stats.proxies import current_stats
@@ -77,10 +78,12 @@ def test_publish_and_consume_events(app, event_entrypoints):
     assert list(current_stats.consume(event_type)) == events
 
 
+@pytest.mark.parametrize('queued_events',
+                         [[datetime.datetime.utcnow().isoformat()]],
+                         indirect=['queued_events'])
 def test_batch_events(app, event_entrypoints, objects,
                       queued_events, sequential_ids):
     """Test processing of multiple events and checking aggregation counts."""
-
     process_events(['file-download'])
     aggregate_events.delay(['file-download-agg'])
     current_search_client.indices.flush(index='*')
@@ -100,5 +103,43 @@ def test_batch_events(app, event_entrypoints, objects,
 
 
 def test_wrong_intervals(app):
+    """Test wrong interval error."""
     with pytest.raises(ValueError):
         StatAggregator(current_search_client, 'test', 'test', 'month', 'day')
+
+
+def test_overwriting_aggregations(app, mock_user_ctx, sequential_ids):
+    """Test that new aggregations in the same intervals overwrite old."""
+    for t in current_search.put_templates(ignore=[400]):
+        pass
+
+    event_type = 'file-download'
+    events = [dict(timestamp=datetime.date.today().isoformat(),
+                   # What:
+                   bucket_id=str(sequential_ids[0]),
+                   file_id=str(sequential_ids[0]),
+                   filename='test.pdf',
+                   visitor_id=100)]
+    current_queues.declare()
+    current_stats.publish(event_type, events)
+    process_events(['file-download'])
+    current_search_client.indices.flush(index='*')
+    aggregate_events(['file-download-agg'])
+    res = current_search_client.search(index='stats-file-download',
+                                       version=True)
+    for hit in res['hits']['hits']:
+        if 'file_id' in hit['_source'].keys():
+            assert hit['_version'] == 1
+
+    current_stats.publish(event_type, events)
+    process_events(['file-download'])
+    current_search_client.indices.flush(index='*')
+    aggregate_events(['file-download-agg'])
+    res = current_search_client.search(index='stats-file-download',
+                                       version=True)
+    for hit in res['hits']['hits']:
+        if 'file_id' in hit['_source'].keys():
+            assert hit['_version'] == 2
+
+    current_search_client.indices.delete(index='events-stats-file-download')
+    current_search_client.indices.delete(index='stats-file-download')
