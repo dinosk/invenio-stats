@@ -102,6 +102,52 @@ def test_batch_events(app, event_entrypoints, objects,
     current_search_client.indices.delete(index='stats-file-download')
 
 
+@pytest.mark.parametrize('queued_events',
+                         [[datetime.datetime.utcnow().isoformat(),
+                          datetime.datetime.strptime('2015-01-01',
+                                                     '%Y-%m-%d'),
+                          datetime.datetime.strptime('2015-03-01',
+                                                     '%Y-%m-%d'),
+                          datetime.datetime.strptime('2015-03-10',
+                                                     '%Y-%m-%d'),
+                          datetime.datetime.strptime('2015-03-11',
+                                                     '%Y-%m-%d'),
+                          datetime.datetime.strptime('2015-04-02',
+                                                     '%Y-%m-%d'),
+                          datetime.datetime.strptime('2015-04-03',
+                                                     '%Y-%m-%d'),
+                          datetime.datetime.strptime('2015-07-01',
+                                                     '%Y-%m-%d'),
+                          datetime.datetime.strptime('2015-08-01',
+                                                     '%Y-%m-%d'),
+                          datetime.datetime.strptime('2015-09-01',
+                                                     '%Y-%m-%d'),
+                          datetime.datetime.strptime('2015-09-01',
+                                                     '%Y-%m-%d')]],
+                         indirect=['queued_events'])
+def test_multiple_days(app, event_entrypoints, objects,
+                       queued_events, sequential_ids):
+    """Test processing of multiple events and checking aggregation counts."""
+    process_events(['file-download'])
+    aggregate_events.delay(['file-download-agg'])
+    current_search_client.indices.flush(index='*')
+    import ipdb
+    ipdb.set_trace()
+
+    # query = Search(using=current_search_client,
+    #                index='stats-file-download').sort('file_id')
+    # results = query.execute()
+    # for idx, result in enumerate(results.hits):
+    #     assert uuid.UUID(result.file_id) == sequential_ids[idx]
+    #     if idx < 1000:
+    #         assert result.count == 101
+    #     else:
+    #         assert result.count == 1
+
+    current_search_client.indices.delete(index='events-stats-file-download')
+    current_search_client.indices.delete(index='stats-file-download')
+
+
 def test_wrong_intervals(app):
     """Test wrong interval error."""
     with pytest.raises(ValueError):
